@@ -42,15 +42,9 @@ jobs:
         with:
           xcode-version: '15.4'
 
-      - name: Install XcodeGen
-        run: |
-          brew install xcodegen
-          echo "XcodeGen installed successfully"
-
       - name: Generate Xcode Project
         run: |
-          xcodegen generate --project .
-          echo "Xcode project generated successfully"
+          python3 .github/scripts/generate_xcodeproj.py
 
       - name: Show Build Environment
         run: |
