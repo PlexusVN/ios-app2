@@ -43,8 +43,96 @@ jobs:
           xcode-version: '15.4'
 
       - name: Generate Xcode Project
+        shell: bash
         run: |
-          python3 .github/scripts/generate_xcodeproj.py
+          cat > /tmp/generate_xcodeproj.py << 'PYEOF'
+          import os, hashlib
+          PROJ = os.getcwd()
+          SRC = os.path.join(PROJ, "SensiUltralock")
+          OUT = os.path.join(PROJ, "SensiUltralock.xcodeproj")
+          def hid(s): return hashlib.md5(s.encode()).hexdigest().upper()[:24]
+          rid = hid("root"); mgid = hid("main"); pgid = hid("products")
+          tid = hid("target"); rgid = hid("resources"); fgid = hid("frameworks")
+          cdid = hid("cfg_debug"); crid = hid("cfg_release")
+          tdid = hid("tgt_debug"); trid = hid("tgt_release")
+          clid = hid("config_list"); tclid = hid("tgt_config_list")
+          prid = hid("product_ref"); sbpid = hid("sources_bp")
+          fbpid = hid("frameworks_bp"); rbpid = hid("resources_bp")
+          aref = hid("fref_Assets"); abid = hid("bf_Assets")
+          swift_files = []
+          for root, dirs, files in os.walk(SRC):
+              for f in files:
+                  if f.endswith(".swift"):
+                      fp = os.path.relpath(os.path.join(root, f), PROJ).replace("\\", "/")
+                      swift_files.append(fp)
+          frefs = {}; bfs = {}
+          for sf in sorted(swift_files):
+              fid = hid("fref_" + sf); bid = hid("bf_" + sf)
+              frefs[sf] = fid; bfs[sf] = bid
+          bf_section = "/* Begin PBXBuildFile section */\n"
+          for sf in sorted(bfs): bf_section += f'\t\t{bfs[sf]} /* {os.path.basename(sf)} in Sources */ = {{isa = PBXBuildFile; fileRef = {frefs[sf]} /* {os.path.basename(sf)} */; }};\n'
+          bf_section += f'\t\t{abid} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {aref} /* Assets.xcassets */; }};\n'
+          bf_section += "/* End PBXBuildFile section */\n\n"
+          fr_section = "/* Begin PBXFileReference section */\n"
+          for sf in sorted(frefs):
+              ext = os.path.splitext(sf)[1]
+              ft = "sourcecode.swift" if ext == ".swift" else "file"
+              fr_section += f'\t\t{frefs[sf]} /* {os.path.basename(sf)} */ = {{isa = PBXFileReference; lastKnownFileType = {ft}; path = {os.path.basename(sf)}; sourceTree = "<group>"; }};\n'
+          fr_section += f'\t\t{aref} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};\n'
+          fr_section += f'\t\t{prid} /* SensiUltralock.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SensiUltralock.app; sourceTree = BUILT_PRODUCTS_DIR; }};\n'
+          fr_section += "/* End PBXFileReference section */\n\n"
+          dirs_set = sorted(set(os.path.dirname(sf) for sf in swift_files))
+          gr_section = f'\t\t{mgid} = {{isa = PBXGroup; children = ({rgid} /* SensiUltralock */,{pgid} /* Products */,); sourceTree = "<group>";}};\n'
+          gr_section += f'\t\t{pgid} = {{isa = PBXGroup; children = ({prid} /* SensiUltralock.app */,); name = Products; sourceTree = "<group>";}};\n'
+          gr_section += f'\t\t{rgid} = {{isa = PBXGroup; children = ('
+          for d in dirs_set:
+              did = hid("grp_"+d)
+              gr_section += f'{did} /* {os.path.basename(d)} */,'
+          gr_section += f'{aref} /* Assets.xcassets */,); path = SensiUltralock; sourceTree = "<group>";}};\n'
+          for d in dirs_set:
+              did = hid("grp_"+d)
+              gr_section += f'\t\t{did} = {{isa = PBXGroup; children = ('
+              for sf in sorted(bfs):
+                  if os.path.dirname(sf) == d:
+                      gr_section += f'{frefs[sf]} /* {os.path.basename(sf)} */,'
+              gr_section += f'); path = {os.path.basename(d)}; sourceTree = "<group>";}};\n'
+          gr_section += f'\t\t{fgid} = {{isa = PBXGroup; children = (); name = Frameworks; sourceTree = "<group>";}};\n'
+          gr_section = "/* Begin PBXGroup section */\n" + gr_section + "/* End PBXGroup section */\n\n"
+          nt_section = "/* Begin PBXNativeTarget section */\n"
+          nt_section += f'\t\t{tid} /* SensiUltralock */ = {{isa = PBXNativeTarget; buildConfigurationList = {tclid}; buildPhases = ({sbpid} /* Sources */,{fbpid} /* Frameworks */,{rbpid} /* Resources */,); buildRules = (); dependencies = (); name = SensiUltralock; productName = SensiUltralock; productReference = {prid}; productType = "com.apple.product-type.application";}};\n'
+          nt_section += "/* End PBXNativeTarget section */\n\n"
+          pr_section = "/* Begin PBXProject section */\n"
+          pr_section += f'\t\t{rid} = {{isa = PBXProject; attributes = {{BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1540; LastUpgradeCheck = 1540; TargetAttributes = {{{tid} = {{CreatedOnToolsVersion = 15.4;}};}};}}; buildConfigurationList = {clid}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base,); mainGroup = {mgid}; productRefGroup = {pgid}; projectDirPath = ""; projectRoot = ""; targets = ({tid},);}};\n'
+          pr_section += "/* End PBXProject section */\n\n"
+          sp_section = "/* Begin PBXSourcesBuildPhase section */\n"
+          sp_section += f'\t\t{sbpid} = {{isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ('
+          for sf in sorted(bfs): sp_section += f'{bfs[sf]} /* {os.path.basename(sf)} in Sources */,'
+          sp_section += '); runOnlyForDeploymentPostprocessing = 0;}};\n'
+          sp_section += "/* End PBXSourcesBuildPhase section */\n\n"
+          fp_section = f'\t\t{fbpid} = {{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;}};\n'
+          rp_section = f'\t\t{rbpid} = {{isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({abid} /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0;}};\n'
+          common = '\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;\n\t\t\t\tCODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCURRENT_PROJECT_VERSION = 1;\n\t\t\t\tGENERATE_INFOPLIST_FILE = YES;\n\t\t\t\tINFOPLIST_FILE = SensiUltralock/Resources/Info.plist;\n\t\t\t\tINFOPLIST_KEY_CFBundleDisplayName = "Sensi Ultralock";\n\t\t\t\tINFOPLIST_KEY_UIApplicationSupportsMultipleScenes = NO;\n\t\t\t\tINFOPLIST_KEY_UILaunchScreen_UIColorName = "";\n\t\t\t\tINFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait";\n\t\t\t\tINFOPLIST_KEY_UIViewControllerBasedStatusBarAppearance = NO;\n\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 16.0;\n\t\t\t\tMARKETING_VERSION = 1.0.0;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.sensiultralock.app;\n\t\t\t\tPRODUCT_NAME = SensiUltralock;\n\t\t\t\tSUPPORTED_PLATFORMS = "iphoneos iphonesimulator";\n\t\t\t\tSUPPORTS_MACCATALYST = NO;\n\t\t\t\tSUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;\n\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;\n\t\t\t\tSWIFT_VERSION = 5.0;\n\t\t\t\tTARGETED_DEVICE_FAMILY = 1;\n'
+          bc_section = "/* Begin XCBuildConfiguration section */\n"
+          bc_section += f'\t\t{cdid} /* Debug */ = {{isa = XCBuildConfiguration; buildSettings = {{ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; MTL_ENABLE_DEBUG_INFO = YES; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; DEBUG_INFORMATION_FORMAT = dwarf;}}; name = Debug;}};\n'
+          bc_section += f'\t\t{crid} /* Release */ = {{isa = XCBuildConfiguration; buildSettings = {{ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; IPHONEOS_DEPLOYMENT_TARGET = 16.0; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; VALIDATE_PRODUCT = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";}}; name = Release;}};\n'
+          bc_section += f'\t\t{tdid} /* Debug */ = {{isa = XCBuildConfiguration; buildSettings = {{{common}\t\t\t}}; name = Debug;}};\n'
+          bc_section += f'\t\t{trid} /* Release */ = {{isa = XCBuildConfiguration; buildSettings = {{{common}\t\t\t}}; name = Release;}};\n'
+          bc_section += "/* End XCBuildConfiguration section */\n\n"
+          xc_section = "/* Begin XCConfigurationList section */\n"
+          xc_section += f'\t\t{clid} = {{isa = XCConfigurationList; buildConfigurations = ({cdid} /* Debug */,{crid} /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;}};\n'
+          xc_section += f'\t\t{tclid} = {{isa = XCConfigurationList; buildConfigurations = ({tdid} /* Debug */,{trid} /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;}};\n'
+          xc_section += "/* End XCConfigurationList section */\n"
+          pbx = '// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {\n\t};\n\tobjectVersion = 56;\n\tobjects = {\n\n'
+          pbx += bf_section + fr_section + gr_section + nt_section + pr_section + sp_section
+          pbx += "/* Begin PBXFrameworksBuildPhase section */\n" + fp_section + "/* End PBXFrameworksBuildPhase section */\n\n"
+          pbx += "/* Begin PBXResourcesBuildPhase section */\n" + rp_section + "/* End PBXResourcesBuildPhase section */\n\n"
+          pbx += bc_section + xc_section
+          pbx += '\t};\n\trootObject = ' + rid + ';\n}\n'
+          os.makedirs(OUT, exist_ok=True)
+          with open(os.path.join(OUT, "project.pbxproj"), "w") as f: f.write(pbx)
+          print("✅ Generated SensiUltralock.xcodeproj (objectVersion=56)")
+          PYEOF
+          python3 /tmp/generate_xcodeproj.py
 
       - name: Show Build Environment
         run: |
