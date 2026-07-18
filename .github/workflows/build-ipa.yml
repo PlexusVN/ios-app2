@@ -1,0 +1,123 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Build Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Debug
+          - Release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_NAME: SensiUltralock
+  SCHEME: SensiUltralock
+  CONFIGURATION: ${{ github.event_name == 'push' && 'Release' || 'Debug' }}
+
+jobs:
+  build:
+    name: Build IPA (${{ github.event_name == 'push' && 'Release' || 'Debug' }})
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Select Xcode Version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          echo "XcodeGen installed successfully"
+
+      - name: Generate Xcode Project
+        run: |
+          xcodegen generate --project .
+          echo "Xcode project generated successfully"
+
+      - name: Show Build Environment
+        run: |
+          xcodebuild -version
+          swift --version
+          echo "Build Configuration: ${{ env.CONFIGURATION }}"
+          echo "Scheme: ${{ env.SCHEME }}"
+
+      - name: Resolve Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "${{ env.PROJECT_NAME }}.xcodeproj" \
+            -scheme "${{ env.SCHEME }}" \
+            -configuration "${{ env.CONFIGURATION }}"
+
+      - name: Build & Archive
+        run: |
+          xcodebuild clean archive \
+            -project "${{ env.PROJECT_NAME }}.xcodeproj" \
+            -scheme "${{ env.SCHEME }}" \
+            -configuration "${{ env.CONFIGURATION }}" \
+            -sdk iphoneos \
+            -archivePath "${{ env.PROJECT_NAME }}.xcarchive" \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            | xcbeautify --renderer github-actions
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "${{ env.PROJECT_NAME }}.xcarchive" \
+            -exportPath "./output" \
+            -exportOptionsPlist .github/exportOptions.plist \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Verify IPA
+        run: |
+          if [ -f "./output/${{ env.PROJECT_NAME }}.ipa" ]; then
+            echo "✅ IPA built successfully!"
+            ls -lh "./output/${{ env.PROJECT_NAME }}.ipa"
+          else
+            echo "❌ IPA not found at expected path"
+            ls -la ./output/ || true
+            # Try to find any .ipa files
+            find . -name "*.ipa" -type f 2>/dev/null
+          fi
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.PROJECT_NAME }}-${{ env.CONFIGURATION }}-${{ github.sha }}"
+          path: |
+            ./output/*.ipa
+            ./output/*.app.dSYM.zip
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Notify Build Status
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: ${{ env.PROJECT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Configuration**: ${{ env.CONFIGURATION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
