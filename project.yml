@@ -3,9 +3,9 @@ options:
   bundleIdPrefix: com.sensiultralock
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15.4"
+  xcodeVersion: "15.0"
   minimumXcodeGenVersion: "2.40.0"
-  projectFormatVersion: 57
+  projectFormatVersion: 56
   generateEmptyDirectories: true
   groupSortPosition: top
 
